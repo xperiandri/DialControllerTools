@@ -1,47 +1,40 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
-using System.ComponentModel.Composition;
-using System.Diagnostics;
 using System.Linq;
 using System.Runtime.InteropServices.WindowsRuntime;
 using System.Threading;
-using System.Threading.Tasks;
 using System.Windows;
-using System.Windows.Threading;
-using EnvDTE80;
+using System.Windows.Interop;
+
+using Community.VisualStudio.Toolkit;
+
 using Microsoft.VisualStudio.ComponentModelHost;
+using Microsoft.VisualStudio.PlatformUI;
+using Microsoft.VisualStudio.PlatformUI.Shell;
+using Microsoft.VisualStudio.PlatformUI.Shell.Controls;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Threading;
-using Windows.Foundation;
-using Windows.Storage;
-using Windows.Storage.Streams;
+
 using Windows.UI.Input;
+
 using Task = System.Threading.Tasks.Task;
 
 namespace DialControllerTools
 {
     internal class DialControllerHost : IDialControllerHost
     {
-        private static readonly Dictionary<EnvDTE.Window, RadialController> controllersMapping = new Dictionary<EnvDTE.Window, RadialController>();
-
-        private readonly DTE2 dte;
-        public DTE2 DTE => dte;
-
-        private readonly IComponentModel _compositionService;
-        public IComponentModel CompositionService => _compositionService;
-
-        private Logger Logger => Logger.Instance;
-
+        private static readonly Dictionary<IntPtr, RadialController> controllersMapping = new Dictionary<IntPtr, RadialController>();
 
         private readonly IAsyncServiceProvider serviceProvider;
+        private readonly OutputWindowPane outputPane;
 
         private RadialControllerStatusBarHost _status;
-        private ImmutableArray<IDialController> _controllers;
-        private bool _firstActivation = true;
-
-        [ImportMany(typeof(IDialControllerProvider))]
-        private IEnumerable<Lazy<IDialControllerProvider, IDialMetadata>> _providers { get; set; }
+        private readonly ImmutableArray<IDialController> _controllers;
+        private readonly List<IDialController> _enabledControllers;
+        private IDialController currentController;
+        private bool allowRelease;
+        private bool wasUsed;
 
         public static DialControllerHost Instance
         {
@@ -49,70 +42,122 @@ namespace DialControllerTools
             private set;
         }
 
-        private DialControllerHost(IAsyncServiceProvider provider, DTE2 dte, IComponentModel compositionService)
+        public IDialController CurrentController
         {
-            this.dte = dte;
-            this._compositionService = compositionService;
-            this.serviceProvider = provider;
-            compositionService.DefaultCompositionService.SatisfyImportsOnce(this);
+            get => currentController;
+            set
+            {
+                currentController = value;
+                _status.Text = currentController.Moniker;
+            }
+        }
+
+        private DialControllerHost(IAsyncServiceProvider serviceProvider, OutputWindowPane outputPane, in ImmutableArray<IDialController> controllers)
+        {
+            this.serviceProvider = serviceProvider;
+            this.outputPane = outputPane;
+            this._controllers = controllers;
+            this._enabledControllers = new List<IDialController>(controllers.Length);
+
+            FloatingWindowManager.FloatingWindowCreated += (sender, args) => CreateControllerForWindow(args.Window);
+            //var floatingWindowManager = ViewManager.Instance.FloatingWindowManager;
+            //floatingWindowManager.
+
+            void OnMainWindowLoaded(object sender, EventArgs args)
+            {
+                CreateStatusBarItem();
+                UpdateEnabledControllers(DialPackage.Options);
+            }
+
+            ExecuteWhenWindowIsLoaded(Application.Current.MainWindow, OnMainWindowLoaded);
         }
 
         public static async Task InitializeAsync(IAsyncServiceProvider provider, JoinableTask optionsLoadTask, CancellationToken cancellationToken)
         {
-            var dte = await provider.GetDteAsync(cancellationToken);
-            var compositionService = await provider.GetServiceAsync<SComponentModel, IComponentModel>(cancellationToken);
+            var compositionServiceTask = provider.GetServiceAsync<SComponentModel, IComponentModel>(cancellationToken);
+            var outputPaneTask = DialPackage.GetOutputPaneAsync();
+            var controllersTask = provider.GetControllersAsync(cancellationToken);
+            await Task.WhenAll(compositionServiceTask, outputPaneTask, controllersTask, optionsLoadTask.Task);
 
-            Instance = new DialControllerHost(provider, dte, compositionService);
-            var mainWindow = dte.DTE.MainWindow;
-            await Task.WhenAll(
-                ThreadHelper.JoinableTaskFactory.StartOnIdle(Instance.CreateStatusBarItem).JoinAsync(),
-                ThreadHelper.JoinableTaskFactory.StartOnIdle(new Action(() => controllersMapping.Add(mainWindow, Instance.CreateController(mainWindow)))).JoinAsync());
-            await optionsLoadTask;
-            await Instance.ImportProvidersAsync(cancellationToken);
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+#pragma warning disable VSTHRD103 // Call async methods when in an async method
+            Instance = new DialControllerHost(provider, outputPaneTask.Result, controllersTask.Result);
+#pragma warning restore VSTHRD103 // Call async methods when in an async method
+
+            foreach (Window window in Application.Current.Windows)
+            {
+                if (window is MainWindow || window is FloatingWindow)
+                    Instance.CreateControllerForWindow(window);
+            }
+        }
+
+        private static void ExecuteWhenWindowIsLoaded(Window window, RoutedEventHandler action)
+        {
+            if (window.IsLoaded) action(window, new RoutedEventArgs());
+            else window.Loaded += action;
         }
 
         private void CreateStatusBarItem()
         {
-            void CreateStatusBarItemImpl()
-            {
-                _status = new RadialControllerStatusBarHost { Name = "PART_DialControllerHost" };
-                var injector = new StatusBarInjector(Application.Current.MainWindow);
-                injector.InjectControl(_status);
-            }
-
-            var mainWindow = Application.Current.MainWindow;
-
-            void OnMainWindowLoaded(object sender, RoutedEventArgs e)
-            {
-                CreateStatusBarItemImpl();
-                mainWindow.Loaded -= OnMainWindowLoaded;
-            }
-
-            if (mainWindow.IsLoaded)
-            {
-                CreateStatusBarItemImpl();
-            }
-            else
-            {
-                mainWindow.Loaded += OnMainWindowLoaded;
-            }
+            _status = new RadialControllerStatusBarHost { Name = "PART_DialControllerHost" };
+            var injector = new StatusBarInjector(Application.Current.MainWindow);
+            injector.InjectControl(_status);
         }
 
-        internal RadialController CreateController(EnvDTE.Window window)
+        private void CreateControllerForWindow(Window window)
+        {
+            void CreateController(object sender, EventArgs args)
+            {
+                window.Loaded -= CreateController;
+                IntPtr hwnd = new WindowInteropHelper(window).Handle;
+                Instance.CreateController(hwnd);
+                SetDefaultItems(hwnd);
+
+                if (window.IsActive) Instance.ApplyCurrentControllerStateForWindow((Window)sender);
+                void OnWindowActivated(object sender, EventArgs args)
+                {
+                    Instance.ApplyCurrentControllerStateForWindow((Window)sender);
+                }
+                window.Activated += OnWindowActivated;
+
+                void RemoveController(object sender, RoutedEventArgs args)
+                {
+                    window.Activated -= OnWindowActivated;
+                    window.Unloaded -= RemoveController;
+                    if (controllersMapping.TryGetValue(hwnd, out var controller))
+                    {
+                        UnsubscribeFromController(controller);
+                        controllersMapping.Remove(hwnd);
+                    }
+                }
+                window.Unloaded += RemoveController;
+            }
+
+            ExecuteWhenWindowIsLoaded(window, CreateController);
+        }
+
+        private void CreateController(IntPtr hwnd)
         {
             var interop = (IRadialControllerInterop)WindowsRuntimeMarshal.GetActivationFactory(typeof(RadialController));
             Guid guid = typeof(RadialController).GetInterface("IRadialController").GUID;
 
-            var radialController = interop.CreateForWindow(window.HWnd, ref guid);
+            var radialController = interop.CreateForWindow(hwnd, ref guid);
+            if (radialController is null)
+            {
+                outputPane.WriteLine("Couldn't create RadialController");
+                return;
+            }
+
+            foreach (IDialController controller in _enabledControllers)
+            {
+                radialController.Menu.Items.Add(controller.MenuItem);
+            }
+
             radialController.RotationChanged += OnRotationChanged;
             radialController.ButtonClicked += OnButtonClicked;
             radialController.ControlAcquired += OnControlAcquired;
-            radialController.ControlLost += OnControlLost;
-
-            if (radialController == null)
-                Logger.Log("Couldn't create RadialController");
-
-            return radialController;
+            //radialController.ControlLost += OnControlLost;
+            controllersMapping.Add(hwnd, radialController);
         }
 
         internal void UnsubscribeFromController(RadialController radialController)
@@ -120,168 +165,148 @@ namespace DialControllerTools
             radialController.RotationChanged -= OnRotationChanged;
             radialController.ButtonClicked -= OnButtonClicked;
             radialController.ControlAcquired -= OnControlAcquired;
-            radialController.ControlLost -= OnControlLost;
+            //radialController.ControlLost -= OnControlLost;
         }
 
-        private static JoinableTask SetDefaultItemsAsync() => ThreadHelper.JoinableTaskFactory.StartOnIdle(() =>
+        private static void SetDefaultItems(IntPtr hwnd)
         {
             RadialControllerConfiguration config;
             var radialControllerConfigInterop = (IRadialControllerConfigurationInterop)WindowsRuntimeMarshal.GetActivationFactory(typeof(RadialControllerConfiguration));
             Guid guid = typeof(RadialControllerConfiguration).GetInterface("IRadialControllerConfiguration").GUID;
 
-            foreach (var window in controllersMapping.Keys)
+            config = radialControllerConfigInterop.GetForWindow(hwnd, ref guid);
+            config.SetDefaultMenuItems(new RadialControllerSystemMenuItemKind[0]);
+        }
+
+        private bool UpdateEnabledControllers(Options options)
+        {
+            var newControllers = _controllers.Where(c => options.MenuVisibility[c.Moniker]).ToImmutableArray();
+            var anyChanges = !newControllers.SequenceEqual(_enabledControllers);
+            if (anyChanges)
             {
-                config = radialControllerConfigInterop.GetForWindow(window.HWnd, ref guid);
-                config.SetDefaultMenuItems(new RadialControllerSystemMenuItemKind[0]);
+                _enabledControllers.Clear();
+                _enabledControllers.AddRange(newControllers);
             }
-        });
+
+            var defaultMenu = options.DefaultProvider.ToString();
+            if (!options.MenuVisibility[defaultMenu])
+            {
+                defaultMenu = options.MenuVisibility.FirstOrDefault(_ => _.Value).Key ?? nameof(KnownProviders.Scroll);
+            }
+            CurrentController = _enabledControllers.First(c => c.Moniker == defaultMenu);
+
+            return anyChanges;
+        }
 
         internal void OptionsApplied(object sender, EventArgs e)
         {
-            var settings = (Options)sender;
-            var anyControllerChangesMade = false;
+            var options = (Options)sender;
+            var anyControllerChangesMade = UpdateEnabledControllers(options);
+
+            if (!anyControllerChangesMade) return;
 
             foreach (var controller in controllersMapping.Values)
             {
-                if (OptionsChangesMade(settings, controller))
+                var menuItems = controller.Menu.Items;
+                for (int i = 0; i < _enabledControllers.Count; i++)
                 {
-                    controller.Menu.Items.Clear();
-                    anyControllerChangesMade = true;
+                    var newMenuItem = _enabledControllers[i].MenuItem;
+                    if (i < menuItems.Count)
+                    {
+                        if (menuItems[i] != _enabledControllers[i].MenuItem)
+                        {
+                            menuItems[i] = newMenuItem;
+                        }
+                    }
+                    else
+                    {
+                        menuItems.Add(newMenuItem);
+                    }
                 }
             }
-
-            if (anyControllerChangesMade)
-                ThreadHelper.JoinableTaskFactory.Run(() => ImportProvidersAsync());
         }
 
-        private static bool OptionsChangesMade(Options settings, RadialController controller)
+        public void ApplyCurrentControllerStateForWindow(Window window)
         {
-            foreach (var setting in settings.MenuVisibility)
-            {
-                if (setting.Value && controller.Menu.Items.All(_ => _.DisplayText != setting.Key))
-                    return true; //setting turned on
+            var radialController = controllersMapping[new WindowInteropHelper(window).Handle];
+            ApplyCurrentControllerState(radialController);
+        }
 
-                if (!setting.Value && controller.Menu.Items.Any(_ => _.DisplayText == setting.Key))
-                    return true; //setting turned off
+        private void ApplyCurrentControllerState(RadialController radialController)
+        {
+            var menuItem = CurrentController.MenuItem;
+            if (radialController.Menu.GetSelectedMenuItem() != menuItem)
+            {
+                radialController.Menu.SelectMenuItem(menuItem);
+            }
+            radialController.UseAutomaticHapticFeedback = CurrentController.IsHapticFeedbackEnabled;
+        }
+
+        public void RequestActivation(IDialController controller)
+        {
+            var activeWindow = Application.Current.Windows.OfType<Window>().SingleOrDefault(w => w.IsActive);
+            if (activeWindow is not null)
+            {
+                allowRelease = true;
+                wasUsed = false;
+                CurrentController = controller;
+                ApplyCurrentControllerStateForWindow(activeWindow);
+            }
+        }
+
+        public void ReleaseActivation()
+        {
+            if (wasUsed || !allowRelease)
+            {
+                wasUsed = false;
+                return;
             }
 
-            return false;
-        }
-
-        internal async Task ImportProvidersAsync(CancellationToken cancellationToken = default)
-        {
-            var tasks = _providers
-                .OrderBy(provider => provider.Metadata.Order) //this is the true add to the menu: TryCreateControllerAsync calls back to AddMenuItemAsync
-                .Select(async provider =>
-                {
-                    var controller = await provider.Value.TryCreateControllerAsync(this, serviceProvider, cancellationToken);
-                    return (Controller: controller, provider.Metadata.Order);
-                });
-            _controllers = (await Task.WhenAll(tasks))
-                           .Where(result => result.Controller != null)
-                           .OrderBy(result => result.Order)  //probably not needed
-                           .Select(result => result.Controller)
-                           .ToImmutableArray();
-
-            await SetDefaultItemsAsync();
-        }
-
-        public Task AddMenuItemAsync(string moniker, string iconFilePath)
-        {
-            if (!DialPackage.Options.MenuVisibility[moniker])
-                return Task.CompletedTask;
-
-            return AddMenuItemInternalAsync(moniker, iconFilePath);
-        }
-
-        private async Task AddMenuItemInternalAsync(string moniker, string iconFilePath)
-        {
-            await Task.Yield();
-            await TaskScheduler.Default;
-
-            StorageFile file = await StorageFile.GetFileFromPathAsync(iconFilePath);
-
-            var stream = RandomAccessStreamReference.CreateFromFile(file);
-            var menuItem = RadialControllerMenuItem.CreateFromIcon(moniker, stream);
-
-            menuItem.Invoked += (sender, args) =>
+            allowRelease = false;
+            var activeWindow = Application.Current.Windows.OfType<Window>().SingleOrDefault(w => w.IsActive);
+            if (activeWindow is not null)
             {
-                _status.Text = sender.DisplayText;
-                _controllers.FirstOrDefault(c => c.Moniker == moniker)?.OnActivate();
-            };
-
-            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-            foreach (var controller in controllersMapping.Values)
-                if (!controller.Menu.Items.Any(i => i.DisplayText == moniker))
+                var radialController = controllersMapping[new WindowInteropHelper(activeWindow).Handle];
+                if (radialController.Menu.TrySelectPreviouslySelectedMenuItem())
                 {
-                    controller.Menu.Items.Add(menuItem);
+                    MenuItemSelected(radialController);
                 }
-        }
-
-        public void RemoveMenuItem(string moniker)
-        {
-            foreach (var controller in controllersMapping.Values)
-            {
-                RadialControllerMenuItem item = controller.Menu.Items.FirstOrDefault(i => i.DisplayText == moniker);
-
-                if (item != null) controller.Menu.Items.Remove(item);
-
             }
         }
-
-        public void RequestActivation(RadialController controller, string moniker)
-        {
-            RadialControllerMenuItem item = controller.Menu.Items.FirstOrDefault(i => i.DisplayText == moniker);
-
-            if (item != null && _status != null) //status null if the 'open recent project' is visible and the dial is rotated
-            {
-                controller.Menu.SelectMenuItem(item);
-                _status.Text = item.DisplayText;
-            }
-        }
-
-        public void RequestActivation(EnvDTE.Window window, string moniker)
-         => RequestActivation(controllersMapping[window], moniker);
-
-        public void ReleaseActivation(RadialController controller)
-        {
-            controller.Menu.TrySelectPreviouslySelectedMenuItem();
-        }
-
-        public void ReleaseActivation(EnvDTE.Window window)
-         => ReleaseActivation(controllersMapping[window]);
 
         private void OnControlAcquired(RadialController sender, RadialControllerControlAcquiredEventArgs args)
         {
-            if (_firstActivation)
+            //_status.IsActive = true;
+            MenuItemSelected(sender);
+        }
+
+        private void MenuItemSelected(RadialController radualController)
+        {
+            RadialControllerMenuItem selectedItem = radualController.Menu.GetSelectedMenuItem();
+            if (selectedItem?.DisplayText != CurrentController.MenuItem.DisplayText)
             {
-                _firstActivation = false;
-                var defaultMenu = DialPackage.Options.DefaultProvider.ToString();
-                if (!DialPackage.Options.MenuVisibility[defaultMenu])
+                allowRelease = false;
+                // null when window is closed
+                var controller = _enabledControllers.FirstOrDefault(c => c.MenuItem == selectedItem);
+                if (controller is not null)
                 {
-                    defaultMenu = DialPackage.Options.MenuVisibility.FirstOrDefault(_ => _.Value).Key ?? nameof(KnownProviders.Scroll);
+                    CurrentController = controller;
+                    radualController.UseAutomaticHapticFeedback = CurrentController.IsHapticFeedbackEnabled;
                 }
-                RequestActivation(sender, defaultMenu);
+
             }
-
-            if (_status != null)
-                _status.Text = sender.Menu.GetSelectedMenuItem()?.DisplayText;
         }
 
-        private void OnControlLost(RadialController sender, object args)
-        {
-            if (_status != null)
-                _status.IsActive = false;
-        }
+        //private void OnControlLost(RadialController sender, object args) => _status.IsActive = false;
 
-        private void OnButtonClicked(RadialController sender, RadialControllerButtonClickedEventArgs args)
+        private async void OnButtonClicked(RadialController sender, RadialControllerButtonClickedEventArgs args)
         {
-            if (!DTE.Solution.IsOpen) //assume most controllers require a solution
+            if (!await VS.Solutions.IsOpenAsync()) //assume most controllers require a solution
                 return;
 
+            wasUsed = true;
             IEnumerable<IDialController> controllers = GetApplicableControllers(sender).Where(c => c.CanHandleClick);
-            Logger.Log("Click: " + string.Join(", ", controllers.Select(c => c.Moniker)));
+            outputPane.WriteLine("Click: " + string.Join(", ", controllers.Select(c => c.Moniker)));
 
             foreach (IDialController controller in controllers)
             {
@@ -294,20 +319,22 @@ namespace DialControllerTools
                 }
                 catch (Exception ex)
                 {
-                    Logger.Log(ex);
+                    outputPane.WriteLine($"Controller {controller.Moniker} failed:");
+                    outputPane.WriteLine(ex.ToString());
                 }
             }
         }
 
-        private void OnRotationChanged(RadialController sender, RadialControllerRotationChangedEventArgs args)
+        private async void OnRotationChanged(RadialController sender, RadialControllerRotationChangedEventArgs args)
         {
-            if (!DTE.Solution.IsOpen) //assume most controllers require a solution
+            if (!await VS.Solutions.IsOpenAsync()) //assume most controllers require a solution
                 return;
 
+            wasUsed = true;
             IEnumerable<IDialController> controllers = GetApplicableControllers(sender).Where(c => c.CanHandleRotate);
             RotationDirection direction = args.RotationDeltaInDegrees > 0 ? RotationDirection.Right : RotationDirection.Left;
 
-            Logger.Log("Rotate: " + string.Join(", ", controllers.Select(c => c.Moniker)));
+            outputPane.WriteLine("Rotate: " + string.Join(", ", controllers.Select(c => c.Moniker)));
 
             foreach (IDialController controller in controllers)
             {
@@ -320,7 +347,8 @@ namespace DialControllerTools
                 }
                 catch (Exception ex)
                 {
-                    Logger.Log(ex);
+                    outputPane.WriteLine($"Controller {controller.Moniker} failed:");
+                    outputPane.WriteLine(ex.ToString());
                 }
             }
         }
@@ -338,7 +366,8 @@ namespace DialControllerTools
             }
             catch (Exception ex)
             {
-                Logger.Log(ex);
+                outputPane.WriteLine($"Cannot retrieve controllers for {moniker}:");
+                outputPane.WriteLine(ex.ToString());
                 return Enumerable.Empty<IDialController>();
             }
         }

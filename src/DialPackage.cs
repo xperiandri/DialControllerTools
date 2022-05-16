@@ -2,9 +2,13 @@
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
+
+using Community.VisualStudio.Toolkit;
+
 using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
+
 using Tasks = System.Threading.Tasks;
 
 namespace DialControllerTools
@@ -33,6 +37,8 @@ namespace DialControllerTools
         private async Task<TReturnType> GetServiceAsync<TServiceType, TReturnType>(CancellationToken cancellationToken)
          => (TReturnType)await GetServiceAsync(typeof(TServiceType));
 
+        internal static Task<OutputWindowPane> GetOutputPaneAsync() => OutputWindowPane.CreateAsync(Vsix.Name);
+
         protected override async Tasks.Task InitializeAsync(CancellationToken cancellationToken, IProgress<ServiceProgressData> progress)
         {
             async Tasks.Task InitializeDialControllerHostAsync()
@@ -46,22 +52,26 @@ namespace DialControllerTools
 #pragma warning restore U2U1003 // Avoid declaring methods used in delegate constructors static
                 var optionsLoadTask = ThreadHelper.JoinableTaskFactory.StartOnIdle(LoadOptions);
 
-                Logger.Initialize(await GetServiceAsync<SVsOutputWindow, IVsOutputWindow>(cancellationToken));
                 try
                 {
-                    var serviceProvider = await GetServiceAsync<SAsyncServiceProvider, Microsoft.VisualStudio.Shell.IAsyncServiceProvider>(cancellationToken);
+                    var serviceProvider = await GetServiceAsync<SAsyncServiceProvider, IAsyncServiceProvider>(cancellationToken);
 
                     await DialControllerHost.InitializeAsync(serviceProvider, optionsLoadTask, cancellationToken);
                     Options.OptionsApplied += DialControllerHost.Instance.OptionsApplied;
                 }
                 catch (Exception ex)
                 {
-                    Logger.Instance.Log(ex);
+                    await ex.LogAsync("DialControllerHost.InitializeAsync");
                 }
             }
 
-            KnownUIContexts.ShellInitializedContext.WhenActivated(() => ThreadHelper.JoinableTaskFactory.StartOnIdle(InitializeDialControllerHostAsync));
+            KnownUIContexts.ShellInitializedContext.WhenActivated(() => ThreadHelper.JoinableTaskFactory.RunAsync(VsTaskRunContext.UIThreadNormalPriority, InitializeDialControllerHostAsync));
             await base.InitializeAsync(cancellationToken, progress);
         }
+
+        //private void WindowEvents_ActiveFrameChanged(ActiveFrameChangeEventArgs args)
+        //{
+        //    DialControllerHost.args.OldFrame
+        //}
     }
 }
