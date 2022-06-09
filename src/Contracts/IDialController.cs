@@ -30,7 +30,6 @@ internal static class DialControllerExtensions
         var compositionService = await serviceProvider.GetServiceAsync<SComponentModel, IComponentModel>(cancellationToken);
         var providers = compositionService.DefaultExportProvider.GetExports<IDialControllerProvider, IDialMetadata>();
         var tasks = providers
-            //this is the true add to the menu: TryCreateControllerAsync calls back to AddMenuItemAsync
             .Select(async provider =>
             {
                 try
