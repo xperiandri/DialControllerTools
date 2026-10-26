@@ -90,34 +90,34 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Community.VisualStudio.Toolkit.17" Version="17.0.445" />
-    <PackageReference Include="EnvDTE" Version="17.14.40260" />
-    <PackageReference Include="EnvDTE100" Version="17.14.40260" />
-    <PackageReference Include="EnvDTE80" Version="17.14.40260" />
-    <PackageReference Include="EnvDTE90" Version="17.14.40260" />
-    <PackageReference Include="Microsoft.VisualStudio.CommandBars" Version="17.14.40260" />
-    <PackageReference Include="Microsoft.VisualStudio.ComponentModelHost" Version="17.14.106" />
-    <PackageReference Include="Microsoft.VisualStudio.Editor" Version="17.14.249" />
-    <PackageReference Include="Microsoft.VisualStudio.Imaging.Interop.14.0.DesignTime" Version="17.14.40254" />
-    <PackageReference Include="Microsoft.VisualStudio.Language.Intellisense" Version="17.14.249" />
-    <PackageReference Include="Microsoft.VisualStudio.Shell.15.0" Version="17.14.40264" />
-    <PackageReference Include="Microsoft.VisualStudio.Shell.Interop" Version="17.14.40260" />
-    <PackageReference Include="Microsoft.VisualStudio.Shell.Interop.10.0" Version="17.14.40260" />
-    <PackageReference Include="Microsoft.VisualStudio.Shell.Interop.11.0" Version="17.14.40260" />
-    <PackageReference Include="Microsoft.VisualStudio.Shell.Interop.8.0" Version="17.14.40260" />
-    <PackageReference Include="Microsoft.VisualStudio.Validation" Version="17.13.22" />
-    <PackageReference Include="Microsoft.VSSDK.BuildTools" Version="18.5.40034" PrivateAssets="all" />
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
-    <PackageReference Include="stdole" Version="17.14.40260" />
-    <PackageReference Include="StreamJsonRpc" Version="2.25.29" />
-    <PackageReference Include="System.Collections.Immutable" Version="9.0.0" />
-    <PackageReference Include="System.Net.Http" Version="4.3.4" />
-    <PackageReference Include="System.Reflection.Emit" Version="4.7.0" />
-    <PackageReference Include="System.Runtime" Version="4.3.1" />
-    <PackageReference Include="System.Runtime.WindowsRuntime" Version="4.7.0" />
-    <PackageReference Include="System.Security.Cryptography.Algorithms" Version="4.3.1" />
-    <PackageReference Include="System.Security.Cryptography.X509Certificates" Version="4.3.2" />
-    <PackageReference Include="System.ValueTuple" Version="4.6.2" />
+    <PackageReference Include="Community.VisualStudio.Toolkit.17" />
+    <PackageReference Include="EnvDTE" />
+    <PackageReference Include="EnvDTE100" />
+    <PackageReference Include="EnvDTE80" />
+    <PackageReference Include="EnvDTE90" />
+    <PackageReference Include="Microsoft.VisualStudio.CommandBars" />
+    <PackageReference Include="Microsoft.VisualStudio.ComponentModelHost" />
+    <PackageReference Include="Microsoft.VisualStudio.Editor" />
+    <PackageReference Include="Microsoft.VisualStudio.Imaging.Interop.14.0.DesignTime" />
+    <PackageReference Include="Microsoft.VisualStudio.Language.Intellisense" />
+    <PackageReference Include="Microsoft.VisualStudio.Shell.15.0" />
+    <PackageReference Include="Microsoft.VisualStudio.Shell.Interop" />
+    <PackageReference Include="Microsoft.VisualStudio.Shell.Interop.10.0" />
+    <PackageReference Include="Microsoft.VisualStudio.Shell.Interop.11.0" />
+    <PackageReference Include="Microsoft.VisualStudio.Shell.Interop.8.0" />
+    <PackageReference Include="Microsoft.VisualStudio.Validation" />
+    <PackageReference Include="Microsoft.VSSDK.BuildTools" PrivateAssets="all" />
+    <PackageReference Include="Newtonsoft.Json" />
+    <PackageReference Include="stdole" />
+    <PackageReference Include="StreamJsonRpc" />
+    <PackageReference Include="System.Collections.Immutable" />
+    <PackageReference Include="System.Net.Http" />
+    <PackageReference Include="System.Reflection.Emit" />
+    <PackageReference Include="System.Runtime" />
+    <PackageReference Include="System.Runtime.WindowsRuntime" />
+    <PackageReference Include="System.Security.Cryptography.Algorithms" />
+    <PackageReference Include="System.Security.Cryptography.X509Certificates" />
+    <PackageReference Include="System.ValueTuple" />
   </ItemGroup>
 
 </Project>
