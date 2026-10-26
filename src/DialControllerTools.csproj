@@ -2,7 +2,6 @@
 
   <PropertyGroup>
     <TargetFramework>net48</TargetFramework>
-    <LangVersion>latest</LangVersion>
     <UseWPF>true</UseWPF>
     <!-- The path of Windows.WinMD below is built from this version; the CI build replaces it with the newest Windows SDK of the runner -->
     <TargetPlatformVersion>10.0.28000.0</TargetPlatformVersion>
