@@ -3,7 +3,7 @@
 ## Project Details
 
 * Surface Dial Tools for Visual Studio – a VSIX extension that adds Surface Dial support to Visual Studio through the Windows `RadialController` API; the features are described in #file:'README.md', the history in #file:'CHANGELOG.md'
-* Installs into Visual Studio 17.0 and later, `amd64` only (see #file:'src/source.extension.vsixmanifest'); .NET Framework 4.8, `LangVersion` is `latest`; the project is SDK-style, so the compiler is the one of the .NET SDK that MSBuild resolves, not the one of Visual Studio
+* Installs into Visual Studio 17.0 and later, `amd64` only (see #file:'src/source.extension.vsixmanifest'); .NET Framework 4.8, C# 14 (`LangVersion` is set once in #file:'Directory.Build.props'); the project is SDK-style, so the compiler is the one of the .NET SDK that MSBuild resolves, not the one of Visual Studio, and C# 14 needs the .NET SDK 10 or later
 * The solution is #file:'DialControllerTools.slnx'. It has one SDK-style project, #file:'src/DialControllerTools.csproj' (`Microsoft.NET.Sdk`, `net48`, `UseWPF`; `VSSDKBuildToolsAutoSetup` makes it a VSIX project): source, XAML and `.resx` files are included by globs, so a new file of those kinds needs no entry, while what goes into the VSIX and the resources that are not `.resx` files are listed in it (see "Solution Structure"). The versions of the packages are in #file:'Directory.Packages.props' (central package management); the project file names the packages only
 * Windows only: building needs Visual Studio with the "Visual Studio extension development" workload and a Windows SDK that matches the `Windows.WinMD` path in the project file. Use the MSBuild of Visual Studio; `dotnet build` cannot build this project: it looks for the private Visual Studio assemblies next to the MSBuild of Visual Studio, and the `.resx` files hold icons, which the MSBuild of the .NET SDK compiles only into a format that needs `System.Resources.Extensions` at run time. The project also references private assemblies of the installed Visual Studio (see "Private Visual Studio Assemblies"), so the Visual Studio that you build with matters
 * Build from the repository root in PowerShell. `msbuild` is usually not on `PATH`, so find it with `vswhere` (add `-version '[17.0,18.0)'` to build with Visual Studio 2022 instead of the latest one); `DeployExtension=false` keeps the build from installing the extension into the Experimental instance:
@@ -53,6 +53,7 @@
 │   ├── Properties/AssemblyInfo.cs            – assembly attributes, taken from the `Vsix` constants
 │   ├── app.config
 │   └── DialControllerTools.csproj
+├── Directory.Build.props                     – the C# language version
 ├── Directory.Build.targets                   – links `.claude/skills` to `.github/skills`
 ├── Directory.Packages.props                  – the versions of the NuGet packages
 └── DialControllerTools.slnx
