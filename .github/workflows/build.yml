@@ -27,7 +27,7 @@ jobs:
     timeout-minutes: 30
     env:
       Configuration: Release
-      Solution: DialControllerTools.sln
+      Solution: DialControllerTools.slnx
 
     steps:
       - name: Checkout code
