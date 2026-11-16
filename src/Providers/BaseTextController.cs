@@ -24,12 +24,14 @@ namespace DialControllerTools
             this.textManager = textManager;
         }
 
-        ///<summary>Gets the native view of the active text editor, or <see langword="null"/> when there is none.</summary>
+        ///<summary>
+        /// Gets the native view of the active text editor, or <see langword="null"/> when there is none.
+        /// </summary>
         public IVsTextView GetCurrentNativeTextView()
         {
             // GetActiveView fails while no text editor is open, for example when only a preview is shown or nothing at all.
-            // That is a missing view, which every caller handles, and not an error: a throw here kept the Scroll item from
-            // sending its keys and escaped from CanHandleRotate of the Editor item, which the host does not guard.
+            // That is a missing view, which every caller handles, and not an error: a throw here would keep the Scroll item from
+            // sending its keys and escape from CanHandleRotate of the Editor item, which the host does not guard.
             return ErrorHandler.Succeeded(textManager.GetActiveView(1, null, out IVsTextView activeView)) ? activeView : null;
         }
 
@@ -44,7 +46,9 @@ namespace DialControllerTools
             return editorAdapter.GetWpfTextView(nativeView);
         }
 
-        ///<summary>Gets the host of the TextView of a native view, which holds the margins of the view next to the text.</summary>
+        ///<summary>
+        /// Gets the host of the TextView of a native view, which holds the margins of the view next to the text.
+        /// </summary>
         public IWpfTextViewHost GetTextViewHost(IVsTextView nativeView)
         {
             if (nativeView is null)
